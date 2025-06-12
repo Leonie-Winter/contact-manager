@@ -1,14 +1,8 @@
 import customtkinter as ctk
 import tkinter as tk
-from collections import OrderedDict
-from tkinter import filedialog, messagebox
-import base64
-import io
-from PIL import Image, ImageTk
-
-from dbms import dbms
-
+from collections import OrderedDict # To preserve the order of attributes
 from dbms.vcard_import import import_vcard
+from dbms import dbms
 
 
 # --- CategorySidebar Class (Leftmost Sidebar: Persons, Groups, Files) ---
@@ -19,7 +13,7 @@ class CategorySidebar(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1) # Allow buttons to expand horizontally
 
         self.on_category_selected_callback = on_category_selected_callback
-        self.current_selection = ctk.StringVar(value="")
+        self.current_selection = ctk.StringVar(value="") # To track selected category
         self.on_import_callback = on_import_callback
         self.category_buttons = []
         self._categories = ["Persons", "Groups", "Files"]
@@ -41,37 +35,17 @@ class CategorySidebar(ctk.CTkFrame):
             )
             button.grid(row=i + 1, column=0, padx=5, pady=2, sticky="ew") # +1 to account for title label
             self.category_buttons.append(button)
-            
-        # Add other buttons below the categories
-        self.clear_data_button = ctk.CTkButton(
-            self, text="Clear all data", command=self._clear_all_data
-        )
-        self.clear_data_button.grid(row=len(self._categories) + 1, column=0, padx=5, pady=(10, 2), sticky="ew")
+            # Add "Import vCard" button below category buttons
+            self.import_button = ctk.CTkButton(
+                self,
+                text="Import vCard",
+                command=self.on_import_callback
+            )
+            self.import_button.grid(row=len(self._categories) + 1, column=0, padx=5, pady=(10, 10), sticky="ew")
 
-        self.generate_data_button = ctk.CTkButton(
-            self, text="Test: Generate new Data", command=self._generate_test_data
-        )
-        self.generate_data_button.grid(row=len(self._categories) + 2, column=0, padx=5, pady=(2, 10), sticky="ew")
-
-        self.import_button = ctk.CTkButton(
-            self, text="Import vCard", command=on_import_callback
-        )
-        self.import_button.grid(row=len(self._categories) + 3, column=0, padx=5, pady=(2, 10), sticky="ew")
 
         # Set initial selection
         self._select_category(self._categories[0]) # Select the first category by default
-
-
-    def _clear_all_data(self):
-        if messagebox.askyesno("Confirm", "Really delete all data?"):
-            dbms.clear_tables()
-            messagebox.showinfo("Success", "All data deleted!")
-            self.on_category_selected_callback(self.current_selection.get())
-
-    def _generate_test_data(self):
-        dbms.generate_test_data()
-        messagebox.showinfo("Success", "Test data generated!")
-        self.on_category_selected_callback(self.current_selection.get())
 
     def _select_category(self, category_text):
         """Internal method to handle category selection and update appearance."""
@@ -96,15 +70,13 @@ class CategorySidebar(ctk.CTkFrame):
 # --- DetailSidebar Class (Second Sidebar: Lists items based on category) ---
 
 class ActionBar(ctk.CTkFrame):
-    def __init__(self, master, current_category_getter, on_refresh_callback=None):
+    def __init__(self, master, on_refresh_callback=None):
         super().__init__(master, corner_radius=0, fg_color="transparent")
-        self.grid(row=0, column=0, sticky="ew")
-        self.grid_columnconfigure((0,1,2,3), weight=1) # Distribute buttons evenly
+        self.grid(row=0, column=3, sticky="ew")
 
-        self.current_category_getter = current_category_getter # Callback to get the current category
         self.on_refresh_callback = on_refresh_callback
 
-        button_width = 70 # Adjust as needed
+        button_width = 50  # Adjust as needed
 
         # Add Add Button
         self.add_button = ctk.CTkButton(self, text="Add", command=self._add_action, width=button_width)
@@ -121,70 +93,30 @@ class ActionBar(ctk.CTkFrame):
 
     def _add_action(self):
         print("Add action triggered.")
-        current_category = self.current_category_getter()
-        if current_category and current_category != "Files": # Cannot add "Files"
-            # Create Window
-            add_window = ExternalWindow(self.master.master, mode="Add", category=current_category)
-            # When the external window closes, refresh the list
-            self.master.master.wait_window(add_window)
-            self._refresh_action() # Refresh after window closes
-        else:
-            messagebox.showinfo("Cannot Add", "Cannot add items to 'Files' category or no category selected.")
+        
+        # Create Window
+        add_window = ExternalWindow(self.master, mode="Add", category=self.master.current_category)
+        add_window.grab_set()
+
 
     def _edit_action(self):
         print("Edit action triggered.")
-        current_category = self.current_category_getter()
-        selected_item_id = self.master.current_item_selection.get() # Get ID from DetailSidebar's selection
         
-        if current_category and selected_item_id != 0 and current_category != "Files":
-            # Create Window
-            edit_window = ExternalWindow(self.master.master, mode="Edit", category=current_category, item_id=selected_item_id)
-            # When the external window closes, refresh the list and update main content
-            self.master.master.wait_window(edit_window)
-            self._refresh_action() # Refresh after window closes
-            # Re-select the item to update its details in MainContentFrame
-            self.master.on_item_selected_callback(current_category, selected_item_id)
-        else:
-            messagebox.showinfo("Cannot Edit", "Please select a persons or group to edit.")
-
+        # Create Window
+        add_window = ExternalWindow(self.master, mode="Edit", category=self.master.current_category)
+        add_window.grab_set()
 
     def _delete_action(self):
         print("Delete action triggered.")
-        current_category = self.current_category_getter()
-        selected_item_id = self.master.current_item_selection.get()
-
-        if current_category and selected_item_id != 0 and current_category.lower() != "files":
-            # Get item name for confirmation message
-            item_data = dbms.get_item_data(current_category.lower(), selected_item_id)
-            item_name = ""
-            if item_data:
-                # Prioritize 'fn' for persons, 'title' for groups
-                item_name = item_data.get('fn') or item_data.get('title')
-            
-            if not item_name: # Fallback if no specific name attribute found
-                item_name = f"{current_category[:-1].capitalize()} ID: {selected_item_id}"
-
-            if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete '{item_name}'?"):
-                try:
-                    # Call the database function to delete the item
-                    dbms.delete_item(current_category.lower(), selected_item_id)
-                    messagebox.showinfo("Delete Success", f"'{item_name}' deleted successfully.")
-                    
-                    # Refresh the list in DetailSidebar to remove the deleted item
-                    self._refresh_action() 
-                    
-                    # Notify MainContentFrame that the item is deleted, so it clears its display
-                    self.master.on_item_selected_callback(current_category, None) 
-                except Exception as e:
-                    messagebox.showerror("Delete Error", f"Failed to delete '{item_name}': {e}")
-                    print(f"Error deleting item {item_name} (ID: {selected_item_id}) from {current_category}: {e}")
-        else:
-            messagebox.showinfo("Cannot Delete", "Please select a persons or group to delete.")
+        # Here you might want to implement a confirmation dialog before deletion
+        # For example, you could use a messagebox to confirm deletion
+        if tk.messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this item?"):
+            print("Item deleted.")
+            # Implement deletion logic here, e.g., remove from database or list
 
     def _refresh_action(self):
         print("Refresh action triggered.")
-        if self.on_refresh_callback:
-            self.on_refresh_callback()
+        self.on_refresh_callback()
 
 
 class DetailSidebar(ctk.CTkFrame):
@@ -195,7 +127,7 @@ class DetailSidebar(ctk.CTkFrame):
 
         self.on_item_selected_callback = on_item_selected_callback
         self.current_category = None
-        self.current_item_selection = ctk.IntVar(value=0) # Stores the ID of the selected item
+        self.current_item_selection = ctk.IntVar(value=0)
 
         self.item_buttons = []
 
@@ -204,10 +136,7 @@ class DetailSidebar(ctk.CTkFrame):
         self.title_label.grid(row=0, column=0, padx=5, pady=(10, 5), sticky="ew")
 
         # Add Action Bar (now in row=1)
-        # Pass a lambda to get the current category from this DetailSidebar
-        self.action_bar = ActionBar(self,
-                                    current_category_getter=lambda: self.current_category,
-                                    on_refresh_callback=lambda: self.update_content(self.current_category, force_update=True))
+        self.action_bar = ActionBar(self, on_refresh_callback=lambda: self.update_content(self.current_category, force_update=True))
         self.action_bar.grid(row=1, column=0, padx=5, pady=(5, 0), sticky="ew")
 
         # Frame to hold scrollable items (now in row=2)
@@ -222,18 +151,12 @@ class DetailSidebar(ctk.CTkFrame):
 
 
     def update_content(self, category_name, force_update=False):
-        """
-        Updates the list of items based on the selected category.
-        `force_update` can be used to re-fetch even if category hasn't changed.
-        """
-        if self.current_category == category_name and not force_update:
+        """Updates the list of items based on the selected category."""
+        if self.current_category == category_name: # No change needed if same category
             return
 
         self.current_category = category_name
-        
-        # Preserve selected item if it exists in the new list, otherwise reset
-        previous_selection_id = self.current_item_selection.get()
-        self.current_item_selection.set(0) # Reset before re-populating
+        self.current_item_selection.set(0) # Reset item selection when category changes
 
         # Clear existing buttons
         for button in self.item_buttons:
@@ -245,26 +168,16 @@ class DetailSidebar(ctk.CTkFrame):
             self.placeholder_label.destroy()
             self.placeholder_label = None
 
-        items = OrderedDict()
-        if category_name != "Files": # Only query DB for Persons/Groups
-            items = dbms.get_all_items_ids_and_names(category_name)
-        else:
-            # For "Files" category, you might list actual files or have mock data
-            # For this example, we'll just show a message.
-            self.placeholder_label = ctk.CTkLabel(self.scrollable_frame, text="File listing not implemented yet.")
-            self.placeholder_label.pack(expand=True)
-            self.on_item_selected_callback(self.current_category, None) # Notify App no item selected
-            return
+        items = OrderedDict(dbms.get_all_items_ids_and_names(category_name))
 
         # If no items found, display placeholder message
         if not items:
-            self.placeholder_label = ctk.CTkLabel(self.scrollable_frame, text=f"No {category_name.lower()} found.")
+            self.placeholder_label = ctk.CTkLabel(self.scrollable_frame, text=f"No {category_name} found.")
             self.placeholder_label.pack(expand=True)
             self.on_item_selected_callback(self.current_category, None) # Notify App no item selected
             return
 
         # Create buttons for each item in the selected category
-        selected_item_found = False
         for item_id, item_text in items.items():
             button = ctk.CTkButton(
                 self.scrollable_frame,
@@ -279,26 +192,17 @@ class DetailSidebar(ctk.CTkFrame):
             button.pack(fill="x", padx=2, pady=1) # fill="x" makes it fill horizontal space
             self.item_buttons.append(button)
 
-            if item_id == previous_selection_id:
-                self.current_item_selection.set(item_id)
-                selected_item_found = True
-
-        # Automatically select the first item in the new category or re-select previous
+        # Automatically select the first item in the new category
         if items:
-            if not selected_item_found:
-                first_item_id = next(iter(items))
-                self._select_item(first_item_id)
-            else:
-                self._select_item(self.current_item_selection.get()) # Trigger update for display
+            # Select the first item by default
+            first_item_id = next(iter(items))
+            self._select_item(first_item_id)
         else:
             self.on_item_selected_callback(self.current_category, None)
 
 
     def _select_item(self, item_id):
         """Internal method to handle item selection and update appearance."""
-        if self.current_item_selection.get() == item_id: # Avoid re-selection if already selected
-            return
-
         print(f"Item Selected: {item_id} from {self.current_category}")
         self.current_item_selection.set(item_id)
         self._update_button_appearance()
@@ -316,189 +220,96 @@ class DetailSidebar(ctk.CTkFrame):
                 button.configure(fg_color=deselected_color)
 
 
+
 # --- MainContentFrame Class ---
 class MainContentFrame(ctk.CTkFrame):
-    """
-    This frame displays the detailed attributes of a selected item (persons or group).
-    It dynamically generates labels for each attribute and its value in a scrollable view.
-    """
     def __init__(self, master):
         super().__init__(master, corner_radius=0, fg_color="transparent")
         self.grid(row=0, column=2, sticky="nswe")
-        self.grid_rowconfigure(0, weight=1)    # Details scroll frame
-        self.grid_rowconfigure(1, weight=0)    # My button row
-        self.grid_rowconfigure(2, weight=0)    # Import button row
-        self.grid_columnconfigure(0, weight=1) # Allows content to expand horizontally
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
 
         self.current_category = None
-        self.current_item_id = None
+        self.current_item = None
 
-        # Initial placeholder label, visible when no item is selected
-        self.placeholder_label = ctk.CTkLabel(
-            self,
-            text="Select a category and an item to view details.",
-            font=("Roboto", 18, "bold"),
-            text_color="gray" # Make it slightly less prominent
-        )
-        self.placeholder_label.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
+        self.display_label = ctk.CTkLabel(self, text="Select an item to view details.", font=("Roboto", 24))
+        self.display_label.pack(expand=True, padx=20, pady=20)
 
-        # --- Buttons at the bottom of the main content frame ---
-        # self.my_button = ctk.CTkButton(self, text="Perform Generic Action", command=self._main_button_callback)
-        # self.my_button.grid(row=1, column=0, padx=20, pady=(0, 10), sticky="s") # Stick to bottom
+        # Your original button (can be integrated into specific content views later)
+        self.my_button = ctk.CTkButton(self, text="Main Action Button", command=self._main_button_callback)
+        self.my_button.pack(padx=20, pady=20, side="bottom")
+        self.import_button = ctk.CTkButton(self, text="Import vCard", command=self.import_vcard_file)
+        self.import_button.pack(padx=20, pady=(0, 20), side="bottom")
 
-        # self.import_button = ctk.CTkButton(self, text="Import vCard", command=self.import_vcard_file)
-        # self.import_button.grid(row=2, column=0, padx=20, pady=(0, 20), sticky="s") # Stick to bottom
 
-        # This will hold the CTkScrollableFrame for item details
-        self.details_scroll_frame = None
-
-        # Attribute display name mapping for friendly labels
-        self.attribute_display_names = {
-            "fn": "First Name", "n": "Last Name", "nickname": "Nickname",
-            "photo": "Photo", "bday": "Birthday", "anniversary": "Anniversary",
-            "gender": "Gender", "adr": "Address", "tel": "Telephone",
-            "email": "Email", "impp": "Instant Messenger", "lang": "Language",
-            "tz": "Time Zone", "geo": "Geolocation", "note": "Notes",
-            "title": "Group Title", "logo": "Group Logo", "org": "Organization",
-            "related": "Related Information", "url": "Website URL"
-        }
-
-    def _clear_content(self):
-        """Clears all dynamically created content within the MainContentFrame."""
-        if self.details_scroll_frame:
-            self.details_scroll_frame.destroy()
-            self.details_scroll_frame = None
-        
-        # Ensure placeholder is visible and packed when no item is selected
-        if self.placeholder_label:
-            self.placeholder_label.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
-
-    def update_content(self, category, item_id=None):
-        """
-        Updates the content displayed based on the selected category and item ID.
-        If item_id is None, a placeholder message is shown.
-        """
-        self._clear_content() # Always clear previous content first
-
+    def update_content(self, category, item_id=0):
+        """Updates the content displayed based on category and item selection."""
         self.current_category = category
-        self.current_item_id = item_id
+        self.current_item = dbms.get_item_data(category, item_id)
 
-        # Handle "Files" category separately as it doesn't have item details in DB
-        if self.current_category == "Files":
-            self.placeholder_label.configure(text="File details can be shown here (not yet implemented).")
-            return
+        # Clear previous content if needed (excluding the main button)
+        for widget in self.winfo_children():
+            if widget not in [self.display_label, self.my_button]: # Keep label and main button
+                widget.destroy()
 
-        if item_id is None:
-            self.placeholder_label.configure(text=f"Select an item from '{category}' to view details.")
-            return
+        if self.current_item:
+            # self.display_label.configure(text=f"Viewing {self.current_item} from {category}!")
+            # # Add specific widgets based on category and item here
+            # if category == "Persons":
+            #     # Example: Add a detailed view for a person
+            #     detail_text = f"Details for {self.current_item}:\n\n- Age: XX\n- Email: {self.current_item.replace(' ', '.').lower()}@example.com\n- Role: {self.current_item.split(' ')[0]}!"
+            #     info_label = ctk.CTkLabel(self, text=detail_text, font=("Roboto", 14), justify="left")
+            #     info_label.pack(padx=20, pady=10, fill="x")
+            # elif category == "Files":
+            #     # Example: Show file properties
+            #     file_info = f"File: {self.current_item}\nType: {self.current_item.split('.')[-1].upper()}\nSize: 1.2MB"
+            #     file_label = ctk.CTkLabel(self, text=file_info, font=("Roboto", 14), justify="left")
+            #     file_label.pack(padx=20, pady=10, fill="x")
+            pass
 
-        # Fetch item data from the database
-        item_data = dbms.get_item_data(category, item_id)
-
-        if not item_data:
-            self.placeholder_label.configure(text=f"No details found for the selected {category[:-1]} (ID: {item_id}).")
-            return
-
-        # Hide the initial placeholder label since we have content to display
-        if self.placeholder_label:
-            self.placeholder_label.grid_forget()
-
-        # Create a scrollable frame for the item details
-        display_title = item_data.get('fn') or item_data.get('title') or f"{category[:-1].capitalize()} Details"
-        self.details_scroll_frame = ctk.CTkScrollableFrame(
-            self,
-            label_text=f"Details for: {display_title}",
-            label_font=ctk.CTkFont(size=18, weight="bold")
-        )
-        self.details_scroll_frame.grid(row=0, column=0, padx=20, pady=(10, 5), sticky="nsew")
-        self.details_scroll_frame.grid_columnconfigure(1, weight=1) # Value column expands
-
-        row_num = 0
-        # Fetch attributes from dbms to ensure correct order and types for display
-        attributes_info = OrderedDict(dbms.get_attributes(self.current_category))
-
-        for attr_name, attr_type in attributes_info.items():
-
-            display_name = self.attribute_display_names.get(attr_name, attr_name.replace("_", " ").title())
-            value = item_data.get(attr_name) # Get raw value
-
-            # Special handling for BLOB types (assuming base64 encoded image data)
-            if attr_type == "BLOB" and value:
-                try:
-                    # Ensure value is a string, then decode
-                    img_data_bytes = base64.b64decode(str(value))
-                    img = Image.open(io.BytesIO(img_data_bytes))
-                    img.thumbnail((200, 200)) # Resize for display in UI
-                    tk_img = ImageTk.PhotoImage(img)
-
-                    # Create a label to hold the image
-                    img_label = ctk.CTkLabel(self.details_scroll_frame, text="", image=tk_img)
-                    img_label.image = tk_img # IMPORTANT: Keep a reference to prevent garbage collection!
-                    img_label.grid(row=row_num, column=0, columnspan=2, padx=10, pady=5)
-                    row_num += 1
-                except (base64.binascii.Error, IOError, Exception) as e:
-                    # Fallback if image decoding or loading fails
-                    print(f"Error displaying image for attribute {attr_name}: {e}")
-                    value_text = f"[Image Data - Unable to Display: {e}]"
-                    
-                    name_label = ctk.CTkLabel(self.details_scroll_frame, text=f"{display_name}:",
-                                              font=ctk.CTkFont(size=13, weight="bold"))
-                    name_label.grid(row=row_num, column=0, padx=(10, 5), pady=2, sticky="nw")
-                    value_label = ctk.CTkLabel(self.details_scroll_frame, text=value_text, wraplength=400, justify="left")
-                    value_label.grid(row=row_num, column=1, padx=(5, 10), pady=2, sticky="w")
-                    row_num += 1
-            else:
-                # Regular text attributes
-                name_label = ctk.CTkLabel(self.details_scroll_frame, text=f"{display_name}:",
-                                          font=ctk.CTkFont(size=13, weight="bold"))
-                name_label.grid(row=row_num, column=0, padx=(10, 5), pady=2, sticky="nw")
-
-                value_text = str(value) if value is not None else "N/A" # Display "N/A" for None values
-
-                value_label = ctk.CTkLabel(self.details_scroll_frame, text=value_text, wraplength=400, justify="left")
-                value_label.grid(row=row_num, column=1, padx=(5, 10), pady=2, sticky="w")
-                row_num += 1
-
+        elif category:
+            self.display_label.configure(text=f"Select an item from {category} to view details.")
+        else:
+            self.display_label.configure(text="Select a category from the first sidebar.")
 
     def _main_button_callback(self):
-        """
-        Generic action button. Its behavior can be customized based on the
-        currently selected category and item.
-        """
-        item_title = None
-        if self.current_item_id and self.current_category:
-            item_data = dbms.get_item_data(self.current_category, self.current_item_id)
-            if item_data:
-                item_title = item_data.get('fn') or item_data.get('title')
-
-        current_info = f"Category: {self.current_category}, Item: {item_title or 'None'}"
-        messagebox.showinfo("Main Action", f"Performing action on:\n{current_info}")
-        print(f"Main Action Button clicked. Current view: {current_info}")
+        print(f"Main Action Button clicked. Current view: {self.current_category}, {self.current_item}")
+        # Logic for the main button, might depend on current_category/current_item
 
     def import_vcard_file(self):
-        """Opens a file dialog to select a vCard file for import."""
+        from tkinter import filedialog
+
         file_path = filedialog.askopenfilename(
             title="Select a vCard file",
             filetypes=[("vCard files", "*.vcf"), ("All files", "*.*")]
         )
         if file_path:
             try:
-                # Call the external vCard import function
                 import_vcard(file_path)
-                messagebox.showinfo("vCard Import", "vCard import successful! Refreshing persons list.")
-                # After successful import, refresh the 'Persons' category in the DetailSidebar
-                # This needs to be done via the App's on_category_selected or directly calling DetailSidebar
-                # self.master is the App instance
-                self.master.detail_sidebar.update_content("Persons", force_update=True)
-                # Optionally, re-select the first persons or the newly imported one if its ID is known
+                print("vCard import successful.")
+                self.master.detail_sidebar.update_content("Persons")
             except Exception as e:
                 print(f"Error importing vCard: {e}")
-                messagebox.showerror("vCard Import Error", f"Failed to import vCard: {e}")
 
 
-# --- ExternalWindow Class (Moved here for self-containment in gui.py) ---
+# --- ExternalWindow Class ---
 class ExternalWindow(ctk.CTkToplevel):
+    """
+    A CustomTkinter Toplevel window for adding new persons/groups or editing existing ones.
+    It dynamically generates input fields based on the attributes of the selected category.
+    All attribute fields are placed within a scrollable frame.
+    """
     def __init__(self, master, mode="Add", category=None, item_id=None):
+        """
+        Initializes the ExternalWindow.
+
+        Args:
+            master (ctk.CTk): The parent CustomTkinter window.
+            mode (str): The operation mode: "Add" for creating a new item,
+                        "Edit" for modifying an existing one.
+            category (str): The type of item being handled (e.g., "persons", "groups").
+            item_id (int, optional): The ID of the item if in "Edit" mode. Defaults to None.
+        """
         super().__init__(master)
 
         self.mode = mode
@@ -507,7 +318,7 @@ class ExternalWindow(ctk.CTkToplevel):
 
         # --- Configure Window Properties ---
         # Set window title based on mode and category
-        # Removes 's' from category name (e.g., "persons" -> "persons")
+        # Removes 's' from category name (e.g., "persons" -> "person")
         title_category = category[:-1] if category and category.endswith('s') else category
         if self.mode == "Add":
             self.title(f"Add New {title_category.capitalize()}")
@@ -531,7 +342,7 @@ class ExternalWindow(ctk.CTkToplevel):
             "fn": "First Name",
             "n": "Last Name",
             "nickname": "Nickname",
-            "photo": "Photo (Base64 Encoded)",
+            "photo": "Photo (Base64 Encoded)", # Note: Storing large images directly in DB is often discouraged
             "bday": "Birthday (YYYY-MM-DD)",
             "anniversary": "Anniversary (YYYY-MM-DD)",
             "gender": "Gender",
@@ -656,7 +467,7 @@ class ExternalWindow(ctk.CTkToplevel):
                 # For readonly fields (like IDs in edit mode), retrieve their existing value
                 collected_data[attr_name] = entry_widget.get().strip()
 
-        # Call the dbms to save the collected data
+        # Call the mock dbms to save the collected data
         # Pass self.item_id (which will be None for 'Add' mode) to differentiate between add/edit
         dbms.save_item_data(self.category, self.item_id, collected_data)
 
@@ -701,7 +512,6 @@ class App(ctk.CTk):
         # Instantiate sidebars and main content frame
         self.main_content_frame = MainContentFrame(self)
         self.detail_sidebar = DetailSidebar(self, self.on_item_selected)
-        # Pass main_content_frame.import_vcard_file as the callback for the Import button
         self.category_sidebar = CategorySidebar(self, self.on_category_selected, self.main_content_frame.import_vcard_file)
 
 
@@ -709,7 +519,7 @@ class App(ctk.CTk):
         """Callback from CategorySidebar when a category is selected."""
         self.detail_sidebar.update_content(category_name)
         # Update main content with a general message for the category
-        self.main_content_frame.update_content(category_name, item_id=None) # No item selected initially for new category
+        self.main_content_frame.update_content(category_name)
 
     def on_item_selected(self, category_name, item_id):
         """Callback from DetailSidebar when an item is selected."""
@@ -717,12 +527,5 @@ class App(ctk.CTk):
 
 
 def launch():
-    # Set CustomTkinter appearance mode and color theme
-    ctk.set_appearance_mode("System")  # Options: "System" (default), "Dark", "Light"
-    ctk.set_default_color_theme("blue")  # Options: "blue" (default), "dark-blue", "green"
-
     app = App()
     app.mainloop()
-
-# if __name__ == "__main__":
-#     launch()

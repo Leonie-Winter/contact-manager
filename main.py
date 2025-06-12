@@ -1,11 +1,12 @@
 import subprocess
 import sys
 import importlib
-from dbms import vcard_import
-from gui import gui 
 
+# Install required packages if not already installed
 required_packages = {
-    "customtkinter": "customtkinter", "vobject":"vobject",
+    "PIL": "Pillow",
+    "customtkinter": "customtkinter", 
+    "vobject":"vobject",
 }
 
 def install_and_import(module_name, package_name):
@@ -20,8 +21,13 @@ def install_and_import(module_name, package_name):
 for module, package in required_packages.items():
     install_and_import(module, package)
 
+
+from dbms import vcard_import
+from gui import gui 
+
 # Run database init
-subprocess.run([sys.executable, "dbms/db.py"])
+subprocess.run([sys.executable, "dbms/dbms.py"])
 
 # Launch GUI 
 gui.launch()
+
