@@ -7,7 +7,6 @@ import io
 from PIL import Image, ImageTk
 
 from dbms import dbms
-
 from dbms.vcard_import import import_vcard
 
 
@@ -145,7 +144,7 @@ class ActionBar(ctk.CTkFrame):
             # Re-select the item to update its details in MainContentFrame
             self.master.on_item_selected_callback(current_category, selected_item_id)
         else:
-            messagebox.showinfo("Cannot Edit", "Please select a persons or group to edit.")
+            messagebox.showinfo("Cannot Edit", "Please select a person or group to edit.")
 
 
     def _delete_action(self):
@@ -179,7 +178,7 @@ class ActionBar(ctk.CTkFrame):
                     messagebox.showerror("Delete Error", f"Failed to delete '{item_name}': {e}")
                     print(f"Error deleting item {item_name} (ID: {selected_item_id}) from {current_category}: {e}")
         else:
-            messagebox.showinfo("Cannot Delete", "Please select a persons or group to delete.")
+            messagebox.showinfo("Cannot Delete", "Please select a person or group to delete.")
 
     def _refresh_action(self):
         print("Refresh action triggered.")
@@ -317,9 +316,86 @@ class DetailSidebar(ctk.CTkFrame):
 
 
 # --- MainContentFrame Class ---
+class AssignmentWindow(ctk.CTkToplevel):
+    """
+    A Toplevel window for assigning persons to groups or groups to persons.
+    """
+    def __init__(self, master, item_id, category_to_assign, current_category, refresh_callback):
+        """
+        Initializes the AssignmentWindow.
+
+        Args:
+            master: The parent widget (e.g., MainContentFrame).
+            item_id: The ID of the current person or group.
+            category_to_assign: The category of items to assign (e.g., "groups" or "persons").
+            current_category: The category of the item being viewed (e.g., "Persons" or "Groups").
+            refresh_callback: A callback function to refresh the main content after saving.
+        """
+        super().__init__(master)
+        self.master = master
+        self.item_id = item_id
+        self.category_to_assign = category_to_assign
+        self.current_category = current_category
+        self.refresh_callback = refresh_callback
+        self.vars = {} # To store BooleanVar for each checkbox
+
+        window_size_factor = 0.3
+        window_width = int(self.winfo_screenwidth() * window_size_factor)
+        window_height = int(self.winfo_screenheight() * window_size_factor)
+        self.geometry(f"{window_width}x{window_height}")
+        self.minsize(200, 250)
+        self.transient(master)  # Make this window transient relative to the master
+        self.grab_set()         # Grab all events to this window
+
+        self._create_widgets()
+
+    def _create_widgets(self):
+        """Creates the widgets for the assignment window."""
+        self.scrollable_frame = ctk.CTkScrollableFrame(self, label_text=f"Select {self.category_to_assign}:")
+        self.scrollable_frame.pack(padx=10, pady=10, fill="both", expand=True)
+
+        all_items = dbms.get_all_items_ids_and_names(self.category_to_assign)
+        
+        if self.current_category == "Persons":
+            assigned_items = set(id for id, _ in dbms.get_groups_for_person(self.item_id))
+        elif self.current_category == "Groups":
+            assigned_items = set(id for id, _ in dbms.get_persons_for_group(self.item_id))
+        else:
+            assigned_items = set() # Should not happen with current logic
+
+        for item_id, item_name in all_items.items():
+            var = ctk.BooleanVar(value=(item_id in assigned_items))
+            chk = ctk.CTkCheckBox(self.scrollable_frame, text=item_name, variable=var)
+            chk.pack(anchor="w", padx=5, pady=2)
+            self.vars[item_id] = var
+
+        save_button = ctk.CTkButton(self, text="Save Assignments", command=self._save_assignments)
+        save_button.pack(pady=10)
+
+    def _save_assignments(self):
+        """Saves the assignments based on checkbox states."""
+        for item_id_to_assign, var in self.vars.items():
+            if self.current_category == "Persons":
+                if var.get():
+                    dbms.assign_person_to_group(self.item_id, item_id_to_assign)
+                else:
+                    dbms.remove_person_from_group(self.item_id, item_id_to_assign)
+            elif self.current_category == "Groups":
+                if var.get():
+                    dbms.assign_person_to_group(item_id_to_assign, self.item_id)
+                else:
+                    dbms.remove_person_from_group(item_id_to_assign, self.item_id)
+        
+        messagebox.showinfo("Assignment Saved", "Assignments updated successfully!")
+        self.destroy() # Close the Toplevel window
+
+        # Refresh the content in the MainContentFrame
+        if self.refresh_callback:
+            self.refresh_callback(self.current_category, self.item_id)
+
 class MainContentFrame(ctk.CTkFrame):
     """
-    This frame displays the detailed attributes of a selected item (persons or group).
+    This frame displays the detailed attributes of a selected item (person or group).
     It dynamically generates labels for each attribute and its value in a scrollable view.
     """
     def __init__(self, master):
@@ -333,6 +409,7 @@ class MainContentFrame(ctk.CTkFrame):
         self.current_category = None
         self.current_item_id = None
 
+
         # Initial placeholder label, visible when no item is selected
         self.placeholder_label = ctk.CTkLabel(
             self,
@@ -342,13 +419,9 @@ class MainContentFrame(ctk.CTkFrame):
         )
         self.placeholder_label.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
 
-        # --- Buttons at the bottom of the main content frame ---
-        # self.my_button = ctk.CTkButton(self, text="Perform Generic Action", command=self._main_button_callback)
-        # self.my_button.grid(row=1, column=0, padx=20, pady=(0, 10), sticky="s") # Stick to bottom
-
-        # self.import_button = ctk.CTkButton(self, text="Import vCard", command=self.import_vcard_file)
-        # self.import_button.grid(row=2, column=0, padx=20, pady=(0, 20), sticky="s") # Stick to bottom
-
+        # Define assign button
+        self.assign_btn = None
+        
         # This will hold the CTkScrollableFrame for item details
         self.details_scroll_frame = None
 
@@ -433,7 +506,7 @@ class MainContentFrame(ctk.CTkFrame):
 
                     # Create a label to hold the image
                     img_label = ctk.CTkLabel(self.details_scroll_frame, text="", image=tk_img)
-                    img_label.image = tk_img # IMPORTANT: Keep a reference to prevent garbage collection!
+                    img_label.image = tk_img
                     img_label.grid(row=row_num, column=0, columnspan=2, padx=10, pady=5)
                     row_num += 1
                 except (base64.binascii.Error, IOError, Exception) as e:
@@ -453,12 +526,65 @@ class MainContentFrame(ctk.CTkFrame):
                                           font=ctk.CTkFont(size=13, weight="bold"))
                 name_label.grid(row=row_num, column=0, padx=(10, 5), pady=2, sticky="nw")
 
-                value_text = str(value) if value is not None else "N/A" # Display "N/A" for None values
+                value_text = str(value) if value is not None else "N/A"
 
                 value_label = ctk.CTkLabel(self.details_scroll_frame, text=value_text, wraplength=400, justify="left")
                 value_label.grid(row=row_num, column=1, padx=(5, 10), pady=2, sticky="w")
                 row_num += 1
 
+        # --- Show linked groups/persons ---
+        if self.current_category == "Persons":
+            groups = dbms.get_groups_for_person(item_id)
+            group_names = ", ".join(title for _, title in groups) if groups else "None"
+            name_label = ctk.CTkLabel(self.details_scroll_frame, text="Groups:",
+                                      font=ctk.CTkFont(size=13, weight="bold"))
+            name_label.grid(row=row_num, column=0, padx=(10, 5), pady=2, sticky="nw")
+            value_label = ctk.CTkLabel(self.details_scroll_frame, text=group_names, wraplength=400, justify="left")
+            value_label.grid(row=row_num, column=1, padx=(5, 10), pady=2, sticky="w")
+            row_num += 1
+
+        elif self.current_category == "Groups":
+            persons = dbms.get_persons_for_group(item_id)
+            person_names = ", ".join(name for _, name in persons) if persons else "None"
+            name_label = ctk.CTkLabel(self.details_scroll_frame, text="Members:",
+                                      font=ctk.CTkFont(size=13, weight="bold"))
+            name_label.grid(row=row_num, column=0, padx=(10, 5), pady=2, sticky="nw")
+            value_label = ctk.CTkLabel(self.details_scroll_frame, text=person_names, wraplength=400, justify="left")
+            value_label.grid(row=row_num, column=1, padx=(5, 10), pady=2, sticky="w")
+            row_num += 1
+
+        # --- Assignment Buttons ---
+        if self.assign_btn:
+            self.assign_btn.destroy()
+
+        if self.current_item_id: # Only show assign button if an item is selected
+            if self.current_category == "Persons":
+                self.assign_btn = ctk.CTkButton(
+                    self.details_scroll_frame,
+                    text="Assign to Groups",
+                    command=lambda: self._open_assignment_window(
+                        self.current_item_id, "groups", "Persons"
+                    )
+                )
+                self.assign_btn.grid(row=999, column=0, columnspan=2, pady=(10, 5)) # Use a high row number to place it at the bottom
+                row_num += 1
+            elif self.current_category == "Groups":
+                self.assign_btn = ctk.CTkButton(
+                    self.details_scroll_frame,
+                    text="Assign Persons",
+                    command=lambda: self._open_assignment_window(
+                        self.current_item_id, "persons", "Groups"
+                    )
+                )
+                self.assign_btn.grid(row=999, column=0, columnspan=2, pady=(10, 5))
+                row_num += 1
+
+    def _open_assignment_window(self, item_id, category_to_assign, current_category):
+        """
+        Opens the AssignmentWindow for person/group assignments.
+        """
+        # Pass self.update_content as the refresh_callback to refresh the main frame
+        AssignmentWindow(self.master, item_id, category_to_assign, current_category, self.update_content)
 
     def _main_button_callback(self):
         """
@@ -490,10 +616,11 @@ class MainContentFrame(ctk.CTkFrame):
                 # This needs to be done via the App's on_category_selected or directly calling DetailSidebar
                 # self.master is the App instance
                 self.master.detail_sidebar.update_content("Persons", force_update=True)
-                # Optionally, re-select the first persons or the newly imported one if its ID is known
+                # Optionally, re-select the first person or the newly imported one if its ID is known
             except Exception as e:
                 print(f"Error importing vCard: {e}")
                 messagebox.showerror("vCard Import Error", f"Failed to import vCard: {e}")
+
 
 
 # --- ExternalWindow Class (Moved here for self-containment in gui.py) ---
@@ -507,7 +634,7 @@ class ExternalWindow(ctk.CTkToplevel):
 
         # --- Configure Window Properties ---
         # Set window title based on mode and category
-        # Removes 's' from category name (e.g., "persons" -> "persons")
+        # Removes 's' from category name (e.g., "persons" -> "person")
         title_category = category[:-1] if category and category.endswith('s') else category
         if self.mode == "Add":
             self.title(f"Add New {title_category.capitalize()}")
@@ -531,9 +658,9 @@ class ExternalWindow(ctk.CTkToplevel):
             "fn": "First Name",
             "n": "Last Name",
             "nickname": "Nickname",
-            "photo": "Photo (Base64 Encoded)",
-            "bday": "Birthday (YYYY-MM-DD)",
-            "anniversary": "Anniversary (YYYY-MM-DD)",
+            "photo": "Photo",
+            "bday": "Birthday",
+            "anniversary": "Anniversary",
             "gender": "Gender",
             "adr": "Address",
             "tel": "Telephone Number",
@@ -544,7 +671,7 @@ class ExternalWindow(ctk.CTkToplevel):
             "geo": "Geolocation (Lat,Long)",
             "note": "Notes",
             "title": "Group Title",
-            "logo": "Group Logo (Base64 Encoded)",
+            "logo": "Group Logo",
             "org": "Organization",
             "related": "Related Information",
             "url": "Website URL"

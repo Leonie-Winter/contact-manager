@@ -60,7 +60,8 @@ def create_tables():
         role_id INTEGER,
         FOREIGN KEY(person_id) REFERENCES persons(person_id),
         FOREIGN KEY(group_id) REFERENCES groups(group_id),
-        FOREIGN KEY(role_id) REFERENCES role(role_id)
+        FOREIGN KEY(role_id) REFERENCES role(role_id),
+        UNIQUE(person_id, group_id)
     )
     """)
 
@@ -316,6 +317,54 @@ def clear_tables():
     connection.close()
     print("Tables cleared successfully.")
 
+
+
+def assign_person_to_group(person_id, group_id):
+    """Assign a person to a group, avoiding duplicates."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    # Check if the connection already exists
+    cursor.execute("SELECT 1 FROM is_in WHERE person_id=? AND group_id=?", (person_id, group_id))
+    if cursor.fetchone() is None:
+        cursor.execute("INSERT INTO is_in (person_id, group_id) VALUES (?, ?)", (person_id, group_id))
+        conn.commit()
+    conn.close()
+
+def remove_person_from_group(person_id, group_id):
+    """Remove a person from a group if the connection exists."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM is_in WHERE person_id=? AND group_id=?", (person_id, group_id))
+    conn.commit()
+    conn.close()
+
+def get_groups_for_person(person_id):
+    """Return a list of (group_id, title) for all groups this person is in."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT g.group_id, g.title FROM groups g
+        JOIN is_in i ON g.group_id = i.group_id
+        WHERE i.person_id = ?
+    """, (person_id,))
+    result = cursor.fetchall()
+    conn.close()
+    return result
+
+def get_persons_for_group(group_id):
+    """Return a list of (person_id, fn) for all persons in this group."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT p.person_id, p.fn FROM persons p
+        JOIN is_in i ON p.person_id = i.person_id
+        WHERE i.group_id = ?
+    """, (group_id,))
+    result = cursor.fetchall()
+    conn.close()
+    return result
+
+
 def generate_test_data():
     """Generates test data for persons and groups using the Tests class."""
     test = Tests()
@@ -329,7 +378,6 @@ def generate_test_data():
     groups = get_all_items_ids_and_names("Groups")
     for group_id, title in groups.items():
         print(f"ID: {group_id}, Title: {title}")
-
 
 class Tests:
     """Class containing test functions for generating random data and inserting it into the database."""

@@ -1,3 +1,6 @@
+# why is there so much stringify?
+# due to a fuckload of problems when trying to import values, such as lists when only strings are accepted, the program makes a string out of every imported value so as not to cause any problems
+
 import sqlite3
 import vobject
 import base64
@@ -44,26 +47,26 @@ def photo_to_blob(photo_obj):
             return None
     return None
 
-def insert_person(cursor, persons):
+def insert_person(cursor, person):
     cursor.execute("""
         INSERT INTO persons (fn, n, nickname, photo, bday, anniversary, gender, adr, tel, email, impp, lang, tz, geo, note)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        persons.get('fn'),
-        persons.get('n'),
-        persons.get('nickname'),
-        persons.get('photo'),
-        persons.get('bday'),
-        persons.get('anniversary'),
-        persons.get('gender'),
-        persons.get('adr'),
-        persons.get('tel'),
-        persons.get('email'),
-        persons.get('impp'),
-        persons.get('lang'),
-        persons.get('tz'),
-        persons.get('geo'),
-        persons.get('note')
+        person.get('fn'),
+        person.get('n'),
+        person.get('nickname'),
+        person.get('photo'),
+        person.get('bday'),
+        person.get('anniversary'),
+        person.get('gender'),
+        person.get('adr'),
+        person.get('tel'),
+        person.get('email'),
+        person.get('impp'),
+        person.get('lang'),
+        person.get('tz'),
+        person.get('geo'),
+        person.get('note')
     ))
     return cursor.lastrowid
 
@@ -127,7 +130,7 @@ def import_vcard(vcf_path):
     cursor = connection.cursor()
 
     for vcard in vobject.readComponents(vcard_data):
-        persons = {
+        person = {
         'fn': stringify(extract_property(vcard, 'fn')),
         'n': None,  # handled later
         'nickname': stringify(extract_property(vcard, 'nickname')),
@@ -148,27 +151,27 @@ def import_vcard(vcf_path):
 
         if hasattr(vcard, 'n'):
             n = vcard.n.value
-            persons['n'] = ' '.join(n) if isinstance(n, (list, tuple)) else str(n)
+            person['n'] = ' '.join(n) if isinstance(n, (list, tuple)) else str(n)
 
         if hasattr(vcard, 'photo'):
-            persons['photo'] = photo_to_blob(vcard.photo)
+            person['photo'] = photo_to_blob(vcard.photo)
 
         if hasattr(vcard, 'bday'):
             val = vcard.bday.value
-            persons['bday'] = val.strftime('%Y-%m-%d') if hasattr(val, 'strftime') else str(val)
+            person['bday'] = val.strftime('%Y-%m-%d') if hasattr(val, 'strftime') else str(val)
 
         if hasattr(vcard, 'anniversary'):
             val = vcard.anniversary.value
-            persons['anniversary'] = val.strftime('%Y-%m-%d') if hasattr(val, 'strftime') else str(val)
+            person['anniversary'] = val.strftime('%Y-%m-%d') if hasattr(val, 'strftime') else str(val)
 
         for field in ['adr', 'tel', 'email', 'impp', 'lang']:
             val = extract_property(vcard, field)
             if isinstance(val, list):
                 val = val[0] if val else None
-            persons[field] = stringify(val)
+            person[field] = stringify(val)
 
 
-        person_id = insert_person(cursor, persons)
+        person_id = insert_person(cursor, person)
 
         # Insert into 'other' table
         other_data = {

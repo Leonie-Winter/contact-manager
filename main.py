@@ -30,4 +30,3 @@ subprocess.run([sys.executable, "dbms/dbms.py"])
 
 # Launch GUI 
 gui.launch()
-
