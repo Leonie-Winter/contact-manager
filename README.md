@@ -1,5 +1,5 @@
 # Contact Manager 
-A full programm written in python with custom tkinter
+fully written in python with custom tkinter
 ---
 
 **To start application simply clone repo and run main.py**
@@ -10,9 +10,10 @@ A full programm written in python with custom tkinter
 - It auto installs packages needed to run
 
 ## Made by 
-- Max Mendgen (Github / Social)
-- Nelio H. (Github / Social)
-- Leonie-Winter (Github)
+- Leonie-Winter ([Github](https://github.com/Leonie-Winter))
+- Max Mendgen ([Github](https://github.com/MaxMendgen))
+- Nelio H.
+
 
 ## Note
 This was created as a replacement for a written examination as part of the "databases" part of our schools compsci course.
